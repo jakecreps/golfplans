@@ -12,16 +12,20 @@ export default function ManagePage() {
   const token = params.token as string;
 
   const [plan, setPlan] = useState<Plan | null>(null);
+  const [loading, setLoading] = useState(true);
   const [expired, setExpired] = useState(false);
   const [invalid, setInvalid] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
 
   useEffect(() => {
-    const p = getPlan(planId);
-    if (!p) { setExpired(true); return; }
-    if (isPlanExpired(p)) { setExpired(true); return; }
-    if (p.creatorToken !== token) { setInvalid(true); return; }
-    setPlan(p);
+    getPlan(planId).then((p) => {
+      if (!p) { setExpired(true); setLoading(false); return; }
+      if (isPlanExpired(p)) { setExpired(true); setLoading(false); return; }
+      if (p.creatorToken !== token) { setInvalid(true); setLoading(false); return; }
+      setPlan(p);
+      setLoading(false);
+    });
   }, [planId, token]);
 
   async function shareLink() {
@@ -42,10 +46,39 @@ export default function ManagePage() {
     setTimeout(() => setCopied(false), 2500);
   }
 
-  function handleRemoveInvitee(inviteeId: string) {
-    const updated = { ...plan!, invitees: plan!.invitees.filter((i) => i.id !== inviteeId) };
-    savePlan(updated);
+  async function handleRemoveInvitee(inviteeId: string) {
+    if (!plan) return;
+    const latest = await getPlan(planId);
+    if (!latest) return;
+    const updated = { ...latest, invitees: latest.invitees.filter((i) => i.id !== inviteeId) };
+    await savePlan(updated);
     setPlan(updated);
+  }
+
+  async function advancePhase() {
+    if (!plan || advancing) return;
+    setAdvancing(true);
+    const nextPhase = plan.phase === 'collecting' ? 'voting' : 'results';
+    const latest = await getPlan(planId);
+    if (!latest) { setAdvancing(false); return; }
+    const updated = { ...latest, phase: nextPhase } as Plan;
+    try {
+      await savePlan(updated);
+      setPlan(updated);
+    } finally {
+      setAdvancing(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center">
+        <svg className="animate-spin h-8 w-8 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+        </svg>
+      </div>
+    );
   }
 
   if (expired) {
@@ -82,8 +115,16 @@ export default function ManagePage() {
 
   const joinUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/${planId}`;
   const creatorResponded = !!plan.creatorPreferences;
-  const responded = plan.invitees.filter((i) => i.responded).length + (creatorResponded ? 1 : 0);
-  const total = plan.invitees.length + 1; // +1 for organizer
+  const respondedCount = plan.invitees.filter((i) => i.responded).length + (creatorResponded ? 1 : 0);
+  const totalCount = plan.invitees.length + 1;
+
+  const activeVoterIds = new Set([
+    ...(plan.creatorPreferences ? [plan.creatorToken] : []),
+    ...plan.invitees.filter((i) => i.responded).map((i) => i.id),
+  ]);
+  const votedCount = new Set(
+    Object.values(plan.votes ?? {}).flat().filter((v) => activeVoterIds.has(v))
+  ).size;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 pb-8">
@@ -98,66 +139,120 @@ export default function ManagePage() {
       </header>
 
       <main className="max-w-lg mx-auto px-4 py-6 space-y-4">
-        {/* Share */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-green-200">
-          <h2 className="font-bold text-gray-800 mb-1 flex items-center gap-2 text-lg">
-            <span>📲</span> Share with your group
-          </h2>
-          <p className="text-sm text-gray-500 mb-4">
-            Drop this in your group chat. Each person picks their preferred time, budget, and how far they'll drive.
-          </p>
-          <div className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-600 font-mono mb-3 break-all">
-            {joinUrl}
-          </div>
-          <button
-            onClick={shareLink}
-            className={`w-full py-3 rounded-xl font-bold text-base transition ${
-              copied ? 'bg-green-100 text-green-700' : 'bg-green-600 text-white hover:bg-green-700'
-            }`}
-          >
-            {copied ? '✓ Copied!' : '📋 Copy Link'}
-          </button>
+
+        {/* Phase indicator */}
+        <div className="flex items-center gap-2">
+          {(['collecting', 'voting', 'results'] as const).map((p, i) => (
+            <div key={p} className="flex items-center gap-2">
+              {i > 0 && <div className="h-px w-6 bg-gray-300" />}
+              <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
+                plan.phase === p
+                  ? 'bg-green-600 text-white'
+                  : i < ['collecting', 'voting', 'results'].indexOf(plan.phase)
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-gray-100 text-gray-400'
+              }`}>
+                {p === 'collecting' ? '1 Preferences' : p === 'voting' ? '2 Voting' : '3 Results'}
+              </div>
+            </div>
+          ))}
         </div>
 
-        {/* Responses */}
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500 mb-0.5">Responses</p>
-              <p className="text-3xl font-bold text-gray-800">
-                {responded}
-                <span className="text-base font-normal text-gray-400"> / {total}</span>
-              </p>
+        {/* Share link — collecting phase only */}
+        {plan.phase === 'collecting' && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-green-200">
+            <h2 className="font-bold text-gray-800 mb-1 flex items-center gap-2 text-lg">
+              <span>📲</span> Share with your group
+            </h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Everyone picks their preferred time, budget, and how far they&apos;ll drive — anonymously.
+            </p>
+            <div className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-600 font-mono mb-3 break-all">
+              {joinUrl}
             </div>
             <button
-              onClick={() => router.push(`/plans/${planId}/summary?token=${token}`)}
-              className="bg-green-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-green-700 transition"
+              onClick={shareLink}
+              className={`w-full py-3 rounded-xl font-bold text-base transition ${
+                copied ? 'bg-green-100 text-green-700' : 'bg-green-600 text-white hover:bg-green-700'
+              }`}
             >
-              View Results →
+              {copied ? '✓ Copied!' : '📋 Copy Link'}
             </button>
           </div>
+        )}
+
+        {/* Status card */}
+        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+          {plan.phase === 'collecting' && (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500 mb-0.5">Responses</p>
+                <p className="text-3xl font-bold text-gray-800">
+                  {respondedCount}<span className="text-base font-normal text-gray-400"> / {totalCount}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => router.push(`/plans/${planId}/summary?token=${token}`)}
+                className="bg-gray-100 text-gray-600 px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-gray-200 transition"
+              >
+                Preview →
+              </button>
+            </div>
+          )}
+          {plan.phase === 'voting' && (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500 mb-0.5">Votes cast</p>
+                <p className="text-3xl font-bold text-gray-800">
+                  {votedCount}<span className="text-base font-normal text-gray-400"> / {respondedCount} responded</span>
+                </p>
+              </div>
+              <button
+                onClick={() => router.push(`/plans/${planId}/summary?token=${token}`)}
+                className="bg-green-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-green-700 transition"
+              >
+                See Votes →
+              </button>
+            </div>
+          )}
+          {plan.phase === 'results' && (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500 mb-0.5">Results are live</p>
+                <p className="text-sm font-semibold text-green-700">Everyone can see the final rankings</p>
+              </div>
+              <button
+                onClick={() => router.push(`/plans/${planId}/summary?token=${token}`)}
+                className="bg-green-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-green-700 transition"
+              >
+                View →
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Your preferences */}
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold text-gray-700">Your Preferences</p>
-              <p className="text-xs text-gray-400 mt-0.5">{creatorResponded ? '✅ Saved' : '⏳ Not filled out yet'}</p>
+        {plan.phase === 'collecting' && (
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-700">Your Preferences</p>
+                <p className="text-xs text-gray-400 mt-0.5">{creatorResponded ? '✅ Saved' : '⏳ Not filled out yet'}</p>
+              </div>
+              <button
+                onClick={() => router.push(`/plans/${planId}/respond/creator`)}
+                className={`text-sm px-4 py-2 rounded-xl font-semibold transition ${
+                  creatorResponded ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-green-600 text-white hover:bg-green-700'
+                }`}
+              >
+                {creatorResponded ? 'Edit' : 'Fill Out'}
+              </button>
             </div>
-            <button
-              onClick={() => router.push(`/plans/${planId}/respond/creator`)}
-              className={`text-sm px-4 py-2 rounded-xl font-semibold transition ${
-                creatorResponded ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-green-600 text-white hover:bg-green-700'
-              }`}
-            >
-              {creatorResponded ? 'Edit' : 'Fill Out'}
-            </button>
           </div>
-        </div>
+        )}
 
-        {/* Respondents list */}
-        {plan.invitees.length > 0 && (
+        {/* Invitee list — collecting phase */}
+        {plan.phase === 'collecting' && plan.invitees.length > 0 && (
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
             <h2 className="font-semibold text-gray-700 mb-3">
               🏌️ Group Responses ({plan.invitees.filter((i) => i.responded).length}/{plan.invitees.length})
@@ -180,6 +275,76 @@ export default function ManagePage() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Phase advancement */}
+        {plan.phase !== 'results' && (
+          <div className={`bg-white rounded-2xl p-5 shadow-sm border ${plan.phase === 'collecting' ? 'border-yellow-200' : 'border-green-200'}`}>
+            {plan.phase === 'collecting' && (
+              <>
+                <h2 className="font-bold text-gray-800 mb-1">Ready to pick a course?</h2>
+                <p className="text-sm text-gray-500 mb-4">
+                  Once you lock responses, the group will vote on courses. Preferences can no longer be submitted after this.
+                </p>
+                <button
+                  onClick={advancePhase}
+                  disabled={respondedCount < 1 || advancing}
+                  className="w-full bg-yellow-500 text-white py-3 rounded-xl font-bold hover:bg-yellow-600 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {advancing ? 'Opening voting…' : '🗳️ Lock Responses & Open Voting'}
+                </button>
+                {respondedCount < 1 && (
+                  <p className="text-xs text-gray-400 text-center mt-2">Waiting for at least one response</p>
+                )}
+              </>
+            )}
+            {plan.phase === 'voting' && (
+              <>
+                <h2 className="font-bold text-gray-800 mb-1">Voting is open</h2>
+                <p className="text-sm text-gray-500 mb-4">
+                  Share the same link with your group. Once everyone has voted, close voting to reveal the final rankings.
+                </p>
+                <div className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-600 font-mono mb-3 break-all">
+                  {joinUrl}
+                </div>
+                <button
+                  onClick={shareLink}
+                  className={`w-full py-2.5 rounded-xl font-semibold text-sm transition mb-3 ${
+                    copied ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {copied ? '✓ Copied!' : '📋 Copy Link'}
+                </button>
+                <button
+                  onClick={advancePhase}
+                  disabled={advancing}
+                  className="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition disabled:opacity-40"
+                >
+                  {advancing ? 'Closing voting…' : '🏆 Close Voting & Show Results'}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {plan.phase === 'results' && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-green-200">
+            <h2 className="font-bold text-green-700 mb-1">🏆 Results are live!</h2>
+            <p className="text-sm text-gray-500 mb-3">
+              Share the link below — everyone can now see the ranked course list and group preferences.
+            </p>
+            <div className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-600 font-mono mb-3 break-all">
+              {joinUrl}
+            </div>
+            <button
+              onClick={shareLink}
+              className={`w-full py-3 rounded-xl font-bold text-base transition ${
+                copied ? 'bg-green-100 text-green-700' : 'bg-green-600 text-white hover:bg-green-700'
+              }`}
+            >
+              {copied ? '✓ Copied!' : '📋 Copy Results Link'}
+            </button>
           </div>
         )}
 

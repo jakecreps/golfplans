@@ -23,33 +23,37 @@ export default function RespondPage() {
   const isCreator = inviteeId === 'creator';
 
   const [plan, setPlan] = useState<Plan | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [selectedTimes, setSelectedTimes] = useState<TimeOfDay[]>([]);
   const [maxPrice, setMaxPrice] = useState<number | null>(null);
   const [location, setLocation] = useState<Location | null>(null);
   const [maxDrive, setMaxDrive] = useState<number | null>(null);
 
   useEffect(() => {
-    const p = getPlan(planId);
-    if (!p) { router.push('/'); return; }
-    setPlan(p);
+    getPlan(planId).then((p) => {
+      if (!p) { router.push('/'); return; }
+      setPlan(p);
+      setLoading(false);
 
-    if (isCreator) {
-      if (p.creatorPreferences) {
-        setSelectedTimes(p.creatorPreferences.timeOfDay);
-        setMaxPrice(p.creatorPreferences.maxPrice);
-        setLocation(p.creatorPreferences.location);
-        setMaxDrive(p.creatorPreferences.maxDriveDistance);
+      if (isCreator) {
+        if (p.creatorPreferences) {
+          setSelectedTimes(p.creatorPreferences.timeOfDay);
+          setMaxPrice(p.creatorPreferences.maxPrice);
+          setLocation(p.creatorPreferences.location);
+          setMaxDrive(p.creatorPreferences.maxDriveDistance);
+        }
+      } else {
+        const invitee = p.invitees.find((i) => i.id === inviteeId);
+        if (!invitee) { router.push('/'); return; }
+        if (invitee.preferences) {
+          setSelectedTimes(invitee.preferences.timeOfDay);
+          setMaxPrice(invitee.preferences.maxPrice);
+          setLocation(invitee.preferences.location);
+          setMaxDrive(invitee.preferences.maxDriveDistance);
+        }
       }
-    } else {
-      const invitee = p.invitees.find((i) => i.id === inviteeId);
-      if (!invitee) { router.push('/'); return; }
-      if (invitee.preferences) {
-        setSelectedTimes(invitee.preferences.timeOfDay);
-        setMaxPrice(invitee.preferences.maxPrice);
-        setLocation(invitee.preferences.location);
-        setMaxDrive(invitee.preferences.maxDriveDistance);
-      }
-    }
+    });
   }, [planId, inviteeId, isCreator, router]);
 
   function toggleTime(t: TimeOfDay) {
@@ -58,30 +62,51 @@ export default function RespondPage() {
     );
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!plan || selectedTimes.length === 0 || !maxPrice || !location || !maxDrive) return;
+    if (!plan || selectedTimes.length === 0 || !maxPrice || !location || !maxDrive || saving) return;
+    setSaving(true);
 
     const prefs: Preferences = { timeOfDay: selectedTimes, maxPrice, location, maxDriveDistance: maxDrive };
 
+    // Re-fetch latest to avoid stale overwrites
+    const latest = await getPlan(planId);
+    if (!latest) { setSaving(false); router.push('/'); return; }
+
     let updated: Plan;
     if (isCreator) {
-      updated = { ...plan, creatorPreferences: prefs };
+      updated = { ...latest, creatorPreferences: prefs };
     } else {
       updated = {
-        ...plan,
-        invitees: plan.invitees.map((i) =>
+        ...latest,
+        invitees: latest.invitees.map((i) =>
           i.id === inviteeId ? { ...i, responded: true, preferences: prefs } : i
         ),
       };
     }
-    savePlan(updated);
-    if (isCreator) {
-      router.push(`/plans/${planId}/manage/${updated.creatorToken}`);
-    } else {
-      localStorage.setItem(`golfplan_me_${planId}`, inviteeId);
-      router.push(`/plans/${planId}/summary`);
+
+    try {
+      await savePlan(updated);
+      if (isCreator) {
+        router.push(`/plans/${planId}/manage/${updated.creatorToken}`);
+      } else {
+        localStorage.setItem(`golfplan_me_${planId}`, inviteeId);
+        router.push(`/plans/${planId}/summary`);
+      }
+    } catch {
+      setSaving(false);
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center">
+        <svg className="animate-spin h-8 w-8 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+        </svg>
+      </div>
+    );
   }
 
   if (!plan) return null;
@@ -100,7 +125,6 @@ export default function RespondPage() {
       <form onSubmit={handleSubmit}>
         <main className="max-w-lg mx-auto px-4 py-6 space-y-5">
 
-          {/* Time of Day */}
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
             <h2 className="font-semibold text-gray-800 mb-1">⏰ When do you prefer to tee off?</h2>
             <p className="text-xs text-gray-400 mb-3">Select all that work for you</p>
@@ -127,7 +151,6 @@ export default function RespondPage() {
             </div>
           </div>
 
-          {/* Max Price */}
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
             <h2 className="font-semibold text-gray-800 mb-1">💵 Max budget per person</h2>
             <p className="text-xs text-gray-400 mb-3">Green fees + cart included</p>
@@ -149,14 +172,12 @@ export default function RespondPage() {
             </div>
           </div>
 
-          {/* Location */}
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-            <h2 className="font-semibold text-gray-800 mb-1">📍 What's your zip code?</h2>
+            <h2 className="font-semibold text-gray-800 mb-1">📍 What&apos;s your zip code?</h2>
             <p className="text-xs text-gray-400 mb-3">Helps find a course that works for everyone</p>
             <AddressSearch value={location} onChange={setLocation} />
           </div>
 
-          {/* Max Drive */}
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
             <h2 className="font-semibold text-gray-800 mb-1">🚗 How far will you drive?</h2>
             <p className="text-xs text-gray-400 mb-3">One way, in miles</p>
@@ -183,10 +204,10 @@ export default function RespondPage() {
           <div className="max-w-lg mx-auto">
             <button
               type="submit"
-              disabled={!canSubmit}
+              disabled={!canSubmit || saving}
               className="w-full bg-green-600 text-white py-4 rounded-2xl font-bold text-lg hover:bg-green-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {!canSubmit ? 'Fill out all sections above' : isCreator ? 'Save & Share with Group →' : 'Save My Preferences'}
+              {saving ? 'Saving…' : !canSubmit ? 'Fill out all sections above' : isCreator ? 'Save & Share with Group →' : 'Save My Preferences'}
             </button>
           </div>
         </div>

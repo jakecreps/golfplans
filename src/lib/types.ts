@@ -1,3 +1,4 @@
+export type Phase = 'collecting' | 'voting' | 'results';
 export type TimeOfDay = 'morning' | 'afternoon' | 'evening';
 
 export interface Location {
@@ -21,9 +22,10 @@ export interface Invitee {
 
 export interface Plan {
   id: string;
-  creatorToken: string; // secret token — only organizer has this URL
-  date: string; // YYYY-MM-DD
+  creatorToken: string;
+  date: string;
   createdAt: string;
+  phase: Phase;
   creatorPreferences?: Preferences;
   invitees: Invitee[];
   votes?: Record<string, string[]>; // courseOsmId -> array of voterIds

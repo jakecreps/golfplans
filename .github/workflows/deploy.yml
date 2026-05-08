@@ -1,0 +1,41 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          # For a project page (username.github.io/repo-name), set this variable
+          # in your repo: Settings → Variables → Actions → New repository variable
+          # Name: NEXT_PUBLIC_BASE_PATH  Value: /your-repo-name
+          # For a user page (username.github.io), leave it unset.
+          NEXT_PUBLIC_BASE_PATH: ${{ vars.NEXT_PUBLIC_BASE_PATH }}
+
+      # Serve index.html for all unknown paths (SPA routing)
+      - run: cp out/index.html out/404.html
+
+      # Prevent GitHub Pages from processing files with Jekyll
+      - run: touch out/.nojekyll
+
+      - uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./out

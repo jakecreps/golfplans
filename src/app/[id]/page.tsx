@@ -21,18 +21,35 @@ export default function JoinPage() {
   const planId = params.id as string;
 
   const [plan, setPlan] = useState<Plan | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [expired, setExpired] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
+
   const [selectedTimes, setSelectedTimes] = useState<TimeOfDay[]>([]);
   const [maxPrice, setMaxPrice] = useState<number | null>(null);
   const [location, setLocation] = useState<Location | null>(null);
   const [maxDrive, setMaxDrive] = useState<number | null>(null);
-  const [expired, setExpired] = useState(false);
 
   useEffect(() => {
-    const p = getPlan(planId);
-    if (!p) { setExpired(true); return; }
-    if (isPlanExpired(p)) { setExpired(true); return; }
-    setPlan(p);
-  }, [planId]);
+    getPlan(planId).then((p) => {
+      if (!p) { setExpired(true); setLoading(false); return; }
+      if (isPlanExpired(p)) { setExpired(true); setLoading(false); return; }
+
+      // Voting or results phase — hand off to summary page
+      if (p.phase === 'voting' || p.phase === 'results') {
+        router.replace(`/plans/${planId}/summary`);
+        return;
+      }
+
+      // Already submitted on this device
+      const myId = localStorage.getItem(`golfplan_me_${planId}`);
+      if (myId) { setSubmitted(true); setLoading(false); return; }
+
+      setPlan(p);
+      setLoading(false);
+    });
+  }, [planId, router]);
 
   function toggleTime(t: TimeOfDay) {
     setSelectedTimes((prev) =>
@@ -40,24 +57,41 @@ export default function JoinPage() {
     );
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!plan || selectedTimes.length === 0 || !maxPrice || !location || !maxDrive) return;
+    if (!plan || selectedTimes.length === 0 || !maxPrice || !location || !maxDrive || saving) return;
+    setSaving(true);
 
     const prefs: Preferences = { timeOfDay: selectedTimes, maxPrice, location, maxDriveDistance: maxDrive };
     const myId = crypto.randomUUID();
 
-    const latest = getPlan(planId)!;
+    // Re-fetch to avoid overwriting concurrent submissions
+    const latest = await getPlan(planId);
+    if (!latest) { setSaving(false); setExpired(true); return; }
+
     const updated: Plan = {
       ...latest,
-      invitees: [
-        ...latest.invitees,
-        { id: myId, responded: true, preferences: prefs },
-      ],
+      invitees: [...latest.invitees, { id: myId, responded: true, preferences: prefs }],
     };
-    savePlan(updated);
-    localStorage.setItem(`golfplan_me_${planId}`, myId);
-    router.push(`/plans/${planId}/summary`);
+
+    try {
+      await savePlan(updated);
+      localStorage.setItem(`golfplan_me_${planId}`, myId);
+      setSubmitted(true);
+    } catch {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center">
+        <svg className="animate-spin h-8 w-8 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+        </svg>
+      </div>
+    );
   }
 
   if (expired) {
@@ -67,6 +101,18 @@ export default function JoinPage() {
           <div className="text-5xl mb-4">⏰</div>
           <h2 className="text-xl font-bold text-gray-800 mb-2">Link Expired</h2>
           <p className="text-gray-500">This plan link has expired. Links are only valid for 24 hours.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (submitted) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center px-4">
+        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-sm w-full text-center">
+          <div className="text-5xl mb-4">🏌️</div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">You&apos;re in!</h2>
+          <p className="text-gray-500">Your preferences have been submitted anonymously. Check back here once the organizer opens voting.</p>
         </div>
       </div>
     );
@@ -136,7 +182,7 @@ export default function JoinPage() {
           </div>
 
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-            <h2 className="font-semibold text-gray-800 mb-1">📍 What's your zip code?</h2>
+            <h2 className="font-semibold text-gray-800 mb-1">📍 What&apos;s your zip code?</h2>
             <p className="text-xs text-gray-400 mb-3">Helps find a course that works for everyone</p>
             <AddressSearch value={location} onChange={setLocation} />
           </div>
@@ -167,10 +213,10 @@ export default function JoinPage() {
           <div className="max-w-lg mx-auto">
             <button
               type="submit"
-              disabled={!canSubmit}
+              disabled={!canSubmit || saving}
               className="w-full bg-green-600 text-white py-4 rounded-2xl font-bold text-lg hover:bg-green-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {!canSubmit ? 'Fill out all sections above' : 'Save My Preferences →'}
+              {saving ? 'Saving…' : !canSubmit ? 'Fill out all sections above' : 'Submit My Preferences →'}
             </button>
           </div>
         </div>

@@ -3,32 +3,38 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { v4 as uuidv4 } from 'uuid';
-import { Plan } from '@/lib/types';
-import { savePlan } from '@/lib/store';
+import { createPlan } from '@/lib/store';
 
 export default function HomePage() {
   const router = useRouter();
   const [date, setDate] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Default to next Saturday
     const d = new Date();
     d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7 || 7));
     setDate(d.toISOString().split('T')[0]);
   }, []);
 
-  function handleCreate(e: React.FormEvent) {
+  async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!date) return;
-    const plan: Plan = {
-      id: uuidv4(),
-      creatorToken: uuidv4(),
-      date,
-      createdAt: new Date().toISOString(),
-      invitees: [],
-    };
-    savePlan(plan);
-    router.push(`/plans/${plan.id}/respond/creator`);
+    if (!date || creating) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const plan = await createPlan({
+        creatorToken: uuidv4(),
+        date,
+        createdAt: new Date().toISOString(),
+        phase: 'collecting',
+        invitees: [],
+      });
+      router.push(`/plans/${plan.id}/respond/creator`);
+    } catch {
+      setError('Could not create plan. Check your connection and try again.');
+      setCreating(false);
+    }
   }
 
   return (
@@ -52,11 +58,15 @@ export default function HomePage() {
                 required
               />
             </div>
+            {error && (
+              <p className="text-sm text-red-500 bg-red-50 rounded-xl px-3 py-2">{error}</p>
+            )}
             <button
               type="submit"
-              className="w-full bg-green-600 text-white rounded-xl py-4 font-bold text-lg hover:bg-green-700 transition"
+              disabled={creating}
+              className="w-full bg-green-600 text-white rounded-xl py-4 font-bold text-lg hover:bg-green-700 transition disabled:opacity-50"
             >
-              Let's Plan →
+              {creating ? 'Creating…' : "Let's Plan →"}
             </button>
           </form>
           <p className="text-center text-xs text-gray-400 mt-4">Links expire after 24 hours</p>
