@@ -35,6 +35,7 @@ function SummaryContent() {
   const [myId, setMyId] = useState<string | null>(null);
   const [voterId, setVoterId] = useState<string | null>(null);
   const [courses, setCourses] = useState<GolfCourse[] | null>(null);
+  const [sortedCourses, setSortedCourses] = useState<GolfCourse[] | null>(null);
   const [coursesLoading, setCoursesLoading] = useState(false);
   const [coursesError, setCoursesError] = useState<string | null>(null);
 
@@ -53,18 +54,17 @@ function SummaryContent() {
     setVoterId(vid);
   }, [planId, router, token]);
 
-  // Live updates: poll localStorage every 3s + cross-tab storage events
-  useEffect(() => {
-    if (!planId) return;
-    const refresh = () => {
-      const fresh = getPlan(planId);
-      if (fresh) setPlan((prev) => JSON.stringify(prev) !== JSON.stringify(fresh) ? fresh : prev);
-    };
-    const interval = setInterval(refresh, 3000);
-    const onStorage = (e: StorageEvent) => { if (e.key === `golfplan_${planId}`) refresh(); };
-    window.addEventListener('storage', onStorage);
-    return () => { clearInterval(interval); window.removeEventListener('storage', onStorage); };
-  }, [planId]);
+  // Stable key that only changes when respondent location data changes (not votes)
+  const respondentsKey = plan
+    ? [
+        plan.creatorPreferences?.location
+          ? `c:${plan.creatorPreferences.location.lat},${plan.creatorPreferences.location.lng},${plan.creatorPreferences.maxDriveDistance}`
+          : '',
+        ...plan.invitees
+          .filter((i) => i.responded && i.preferences?.location?.lat)
+          .map((i) => `${i.id}:${i.preferences!.location.lat},${i.preferences!.location.lng},${i.preferences!.maxDriveDistance}`),
+      ].join('|')
+    : '';
 
   useEffect(() => {
     if (!plan) return;
@@ -75,6 +75,21 @@ function SummaryContent() {
         .map((i) => ({ prefs: i.preferences! })),
     ];
     if (withLoc.length < 1) return;
+
+    // Check localStorage cache first
+    const cacheKey = `golfplan_courses_${respondentsKey}`;
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const list: GolfCourse[] = JSON.parse(cached);
+        setCourses(list);
+        setSortedCourses([...list].sort((a, b) =>
+          (plan.votes?.[String(b.id)]?.length ?? 0) - (plan.votes?.[String(a.id)]?.length ?? 0)
+        ));
+        return; // skip the network fetch
+      }
+    } catch { /* ignore parse errors, fall through to fetch */ }
+
     setCoursesLoading(true);
     setCourses(null);
     setCoursesError(null);
@@ -149,10 +164,17 @@ function SummaryContent() {
           })
           .sort((a, b) => a.name.localeCompare(b.name));
         setCourses(list);
+        // Sort by initial vote count once, then keep stable
+        setSortedCourses([...list].sort((a, b) =>
+          (plan.votes?.[String(b.id)]?.length ?? 0) - (plan.votes?.[String(a.id)]?.length ?? 0)
+        ));
+        // Cache results so refreshes don't re-fetch
+        try { localStorage.setItem(cacheKey, JSON.stringify(list)); } catch { /* quota exceeded, skip */ }
       })
       .catch((e) => setCoursesError(e.message))
       .finally(() => setCoursesLoading(false));
-  }, [plan]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [respondentsKey]);
 
   function toggleVote(courseId: number) {
     if (!voterId) return;
@@ -316,40 +338,26 @@ function SummaryContent() {
                 {courses && courses.length === 0 && (
                   <p className="text-sm text-gray-400 text-center py-4">No courses found in the overlap area.</p>
                 )}
-                {courses && courses.length > 0 && (() => {
+                {sortedCourses && sortedCourses.length > 0 && (() => {
+                  const isOrganizer = token !== null;
                   const myTotalVotes = Object.values(plan.votes ?? {}).filter((v) => voterId && v.includes(voterId)).length;
-                  const sorted = [...courses].sort((a, b) =>
-                    (plan.votes?.[String(b.id)]?.length ?? 0) - (plan.votes?.[String(a.id)]?.length ?? 0)
-                  );
                   return (
                     <div className="space-y-2">
-                      {myTotalVotes < 3 && (
-                        <p className="text-xs text-gray-400 pb-1">Tap a course to vote · {3 - myTotalVotes} vote{3 - myTotalVotes !== 1 ? 's' : ''} left</p>
+                      {myTotalVotes < 3 ? (
+                        <p className="text-xs text-gray-400 pb-1">{3 - myTotalVotes} vote{3 - myTotalVotes !== 1 ? 's' : ''} left to cast</p>
+                      ) : (
+                        <p className="text-xs text-green-600 pb-1 font-medium">All 3 votes cast — tap a star to remove one</p>
                       )}
-                      {myTotalVotes >= 3 && (
-                        <p className="text-xs text-green-600 pb-1 font-medium">You've used all 3 votes. Tap a vote to remove it.</p>
-                      )}
-                      {sorted.slice(0, 15).map((c) => {
+                      {sortedCourses.slice(0, 15).map((c) => {
                         const courseVotes = plan.votes?.[String(c.id)] ?? [];
                         const voteCount = courseVotes.length;
                         const iVoted = voterId ? courseVotes.includes(voterId) : false;
                         const canVote = !iVoted && myTotalVotes < 3;
                         return (
-                          <div key={c.id} className={`flex items-center gap-3 py-2 border-b border-gray-50 last:border-0 rounded-xl transition ${iVoted ? 'bg-green-50 -mx-2 px-2' : ''}`}>
-                            <button
-                              onClick={() => toggleVote(c.id)}
-                              title={iVoted ? 'Remove vote' : canVote ? 'Vote for this course' : 'No votes left'}
-                              className={`w-9 h-9 rounded-xl flex-shrink-0 flex flex-col items-center justify-center text-xs font-bold transition border-2 ${
-                                iVoted
-                                  ? 'bg-green-600 border-green-600 text-white'
-                                  : canVote
-                                    ? 'bg-gray-50 border-gray-200 text-gray-400 hover:border-green-400 hover:text-green-600'
-                                    : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
-                              }`}
-                            >
-                              <span className="text-base leading-none">{iVoted ? '★' : '☆'}</span>
-                              {voteCount > 0 && <span className="leading-none mt-0.5">{voteCount}</span>}
-                            </button>
+                          <div key={c.id} className={`flex items-center gap-3 py-2 border-b border-gray-50 last:border-0 ${iVoted ? 'bg-green-50 rounded-xl -mx-2 px-2' : ''}`}>
+                            <div className="w-8 h-8 rounded-xl bg-green-50 flex-shrink-0 flex items-center justify-center text-lg">
+                              ⛳
+                            </div>
                             <div className="min-w-0 flex-1">
                               <a href={c.website} target="_blank" rel="noopener noreferrer"
                                 className="text-sm font-semibold text-green-700 hover:underline truncate block">
@@ -363,11 +371,25 @@ function SummaryContent() {
                                 )}
                               </p>
                             </div>
+                            <button
+                              onClick={() => toggleVote(c.id)}
+                              disabled={!iVoted && !canVote}
+                              className={`flex-shrink-0 flex flex-col items-center justify-center w-10 h-10 rounded-xl border-2 font-bold text-sm transition ${
+                                iVoted
+                                  ? 'bg-green-600 border-green-600 text-white'
+                                  : canVote
+                                    ? 'bg-gray-50 border-gray-200 text-gray-400 hover:border-green-400 hover:text-green-600'
+                                    : 'bg-gray-50 border-gray-100 text-gray-200 cursor-not-allowed'
+                              }`}
+                            >
+                              <span className="text-base leading-none">{iVoted ? '★' : '☆'}</span>
+                              {isOrganizer && voteCount > 0 && <span className="text-xs leading-none mt-0.5">{voteCount}</span>}
+                            </button>
                           </div>
                         );
                       })}
-                      {courses.length > 15 && (
-                        <p className="text-xs text-gray-400 text-center pt-1">+{courses.length - 15} more courses</p>
+                      {sortedCourses.length > 15 && (
+                        <p className="text-xs text-gray-400 text-center pt-1">+{sortedCourses.length - 15} more courses</p>
                       )}
                     </div>
                   );
