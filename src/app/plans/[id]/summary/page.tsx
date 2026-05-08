@@ -45,12 +45,25 @@ function SummaryContent() {
     setPlan(p);
     const mid = localStorage.getItem(`golfplan_me_${planId}`);
     setMyId(mid);
-    // Stable voter identity: invitee id, or creator token from URL, or generated
-    const vid = mid ?? token ?? (() => {
-      let v = localStorage.getItem(`golfplan_voter_${planId}`);
-      if (!v) { v = crypto.randomUUID(); localStorage.setItem(`golfplan_voter_${planId}`, v); }
-      return v;
-    })();
+    // Organizer token always wins for voting identity (even if they also submitted as a player)
+    let vid: string;
+    if (token) {
+      // Organizer arrived with token — persist it so refreshes without ?token= still work
+      localStorage.setItem(`golfplan_voter_${planId}`, token);
+      vid = token;
+    } else {
+      const storedVoter = localStorage.getItem(`golfplan_voter_${planId}`);
+      // If stored voter matches the plan's creatorToken, they're the organizer
+      if (storedVoter) {
+        vid = storedVoter;
+      } else if (mid) {
+        vid = mid;
+      } else {
+        const v = crypto.randomUUID();
+        localStorage.setItem(`golfplan_voter_${planId}`, v);
+        vid = v;
+      }
+    }
     setVoterId(vid);
   }, [planId, router, token]);
 
@@ -339,7 +352,12 @@ function SummaryContent() {
                   <p className="text-sm text-gray-400 text-center py-4">No courses found in the overlap area.</p>
                 )}
                 {sortedCourses && sortedCourses.length > 0 && (() => {
-                  const isOrganizer = token !== null;
+                  const isOrganizer = token !== null || voterId === plan.creatorToken;
+                  // Only count votes from known active respondents
+                  const activeVoterIds = new Set<string>([
+                    ...(plan.creatorPreferences ? [plan.creatorToken] : []),
+                    ...plan.invitees.filter((i) => i.responded).map((i) => i.id),
+                  ]);
                   const myTotalVotes = Object.values(plan.votes ?? {}).filter((v) => voterId && v.includes(voterId)).length;
                   return (
                     <div className="space-y-2">
@@ -350,7 +368,7 @@ function SummaryContent() {
                       )}
                       {sortedCourses.slice(0, 15).map((c) => {
                         const courseVotes = plan.votes?.[String(c.id)] ?? [];
-                        const voteCount = courseVotes.length;
+                        const voteCount = courseVotes.filter((v) => activeVoterIds.has(v)).length;
                         const iVoted = voterId ? courseVotes.includes(voterId) : false;
                         const canVote = !iVoted && myTotalVotes < 3;
                         return (
