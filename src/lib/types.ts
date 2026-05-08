@@ -26,4 +26,5 @@ export interface Plan {
   createdAt: string;
   creatorPreferences?: Preferences;
   invitees: Invitee[];
+  votes?: Record<string, string[]>; // courseOsmId -> array of voterIds
 }

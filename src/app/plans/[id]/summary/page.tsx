@@ -4,7 +4,7 @@ import { Suspense, useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { Plan, Preferences, TimeOfDay } from '@/lib/types';
-import { getPlan, formatDate, isPlanExpired } from '@/lib/store';
+import { getPlan, savePlan, formatDate, isPlanExpired } from '@/lib/store';
 
 const PlanMap = dynamic(() => import('@/components/PlanMap'), { ssr: false });
 
@@ -33,6 +33,7 @@ function SummaryContent() {
   const token = searchParams.get('token');
   const [plan, setPlan] = useState<Plan | null>(null);
   const [myId, setMyId] = useState<string | null>(null);
+  const [voterId, setVoterId] = useState<string | null>(null);
   const [courses, setCourses] = useState<GolfCourse[] | null>(null);
   const [coursesLoading, setCoursesLoading] = useState(false);
   const [coursesError, setCoursesError] = useState<string | null>(null);
@@ -41,8 +42,29 @@ function SummaryContent() {
     const p = getPlan(planId);
     if (!p || isPlanExpired(p)) { router.push('/'); return; }
     setPlan(p);
-    setMyId(localStorage.getItem(`golfplan_me_${planId}`));
-  }, [planId, router]);
+    const mid = localStorage.getItem(`golfplan_me_${planId}`);
+    setMyId(mid);
+    // Stable voter identity: invitee id, or creator token from URL, or generated
+    const vid = mid ?? token ?? (() => {
+      let v = localStorage.getItem(`golfplan_voter_${planId}`);
+      if (!v) { v = crypto.randomUUID(); localStorage.setItem(`golfplan_voter_${planId}`, v); }
+      return v;
+    })();
+    setVoterId(vid);
+  }, [planId, router, token]);
+
+  // Live updates: poll localStorage every 3s + cross-tab storage events
+  useEffect(() => {
+    if (!planId) return;
+    const refresh = () => {
+      const fresh = getPlan(planId);
+      if (fresh) setPlan((prev) => JSON.stringify(prev) !== JSON.stringify(fresh) ? fresh : prev);
+    };
+    const interval = setInterval(refresh, 3000);
+    const onStorage = (e: StorageEvent) => { if (e.key === `golfplan_${planId}`) refresh(); };
+    window.addEventListener('storage', onStorage);
+    return () => { clearInterval(interval); window.removeEventListener('storage', onStorage); };
+  }, [planId]);
 
   useEffect(() => {
     if (!plan) return;
@@ -131,6 +153,25 @@ function SummaryContent() {
       .catch((e) => setCoursesError(e.message))
       .finally(() => setCoursesLoading(false));
   }, [plan]);
+
+  function toggleVote(courseId: number) {
+    if (!voterId) return;
+    const key = String(courseId);
+    const current = getPlan(planId);
+    if (!current) return;
+    const votes = { ...(current.votes ?? {}) };
+    const courseVoters = votes[key] ?? [];
+    if (courseVoters.includes(voterId)) {
+      votes[key] = courseVoters.filter((v) => v !== voterId);
+    } else {
+      const myTotal = Object.values(votes).filter((v) => v.includes(voterId)).length;
+      if (myTotal >= 3) return;
+      votes[key] = [...courseVoters, voterId];
+    }
+    const updated = { ...current, votes };
+    savePlan(updated);
+    setPlan(updated);
+  }
 
   if (!plan) return null;
 
@@ -275,33 +316,62 @@ function SummaryContent() {
                 {courses && courses.length === 0 && (
                   <p className="text-sm text-gray-400 text-center py-4">No courses found in the overlap area.</p>
                 )}
-                {courses && courses.length > 0 && (
-                  <div className="space-y-2">
-                    {courses.slice(0, 15).map((c) => (
-                      <div key={c.id} className="flex items-start gap-3 py-2 border-b border-gray-50 last:border-0">
-                        <div className="w-8 h-8 rounded-xl bg-green-50 flex-shrink-0 flex items-center justify-center text-lg">
-                          ⛳
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <a href={c.website} target="_blank" rel="noopener noreferrer"
-                            className="text-sm font-semibold text-green-700 hover:underline truncate block">
-                            {c.name}
-                          </a>
-                          <p className="text-xs text-gray-400">
-                            {[c.city, c.state].filter(Boolean).join(', ')}
-                            {c.holes ? ` · ${c.holes} holes` : ''}
-                            {!c.website.startsWith('http') || c.website.includes('google.com/maps') ? (
-                              <span className="ml-1 text-gray-300">· Maps ↗</span>
-                            ) : null}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                    {courses.length > 15 && (
-                      <p className="text-xs text-gray-400 text-center pt-1">+{courses.length - 15} more courses</p>
-                    )}
-                  </div>
-                )}
+                {courses && courses.length > 0 && (() => {
+                  const myTotalVotes = Object.values(plan.votes ?? {}).filter((v) => voterId && v.includes(voterId)).length;
+                  const sorted = [...courses].sort((a, b) =>
+                    (plan.votes?.[String(b.id)]?.length ?? 0) - (plan.votes?.[String(a.id)]?.length ?? 0)
+                  );
+                  return (
+                    <div className="space-y-2">
+                      {myTotalVotes < 3 && (
+                        <p className="text-xs text-gray-400 pb-1">Tap a course to vote · {3 - myTotalVotes} vote{3 - myTotalVotes !== 1 ? 's' : ''} left</p>
+                      )}
+                      {myTotalVotes >= 3 && (
+                        <p className="text-xs text-green-600 pb-1 font-medium">You've used all 3 votes. Tap a vote to remove it.</p>
+                      )}
+                      {sorted.slice(0, 15).map((c) => {
+                        const courseVotes = plan.votes?.[String(c.id)] ?? [];
+                        const voteCount = courseVotes.length;
+                        const iVoted = voterId ? courseVotes.includes(voterId) : false;
+                        const canVote = !iVoted && myTotalVotes < 3;
+                        return (
+                          <div key={c.id} className={`flex items-center gap-3 py-2 border-b border-gray-50 last:border-0 rounded-xl transition ${iVoted ? 'bg-green-50 -mx-2 px-2' : ''}`}>
+                            <button
+                              onClick={() => toggleVote(c.id)}
+                              title={iVoted ? 'Remove vote' : canVote ? 'Vote for this course' : 'No votes left'}
+                              className={`w-9 h-9 rounded-xl flex-shrink-0 flex flex-col items-center justify-center text-xs font-bold transition border-2 ${
+                                iVoted
+                                  ? 'bg-green-600 border-green-600 text-white'
+                                  : canVote
+                                    ? 'bg-gray-50 border-gray-200 text-gray-400 hover:border-green-400 hover:text-green-600'
+                                    : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+                              }`}
+                            >
+                              <span className="text-base leading-none">{iVoted ? '★' : '☆'}</span>
+                              {voteCount > 0 && <span className="leading-none mt-0.5">{voteCount}</span>}
+                            </button>
+                            <div className="min-w-0 flex-1">
+                              <a href={c.website} target="_blank" rel="noopener noreferrer"
+                                className="text-sm font-semibold text-green-700 hover:underline truncate block">
+                                {c.name}
+                              </a>
+                              <p className="text-xs text-gray-400">
+                                {[c.city, c.state].filter(Boolean).join(', ')}
+                                {c.holes ? ` · ${c.holes} holes` : ''}
+                                {c.website.includes('google.com/maps') && (
+                                  <span className="ml-1 text-gray-300">· Maps ↗</span>
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {courses.length > 15 && (
+                        <p className="text-xs text-gray-400 text-center pt-1">+{courses.length - 15} more courses</p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
