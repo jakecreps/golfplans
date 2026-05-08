@@ -74,8 +74,25 @@ function SummaryContent() {
     const radiusMeters = Math.round(maxRadius * 1609.34);
 
     const query = `[out:json][timeout:25];(way["leisure"="golf_course"](around:${radiusMeters},${centLat.toFixed(5)},${centLng.toFixed(5)});relation["leisure"="golf_course"](around:${radiusMeters},${centLat.toFixed(5)},${centLng.toFixed(5)}););out tags center 50;`;
-    fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`)
-      .then((r) => r.json())
+    const OVERPASS_ENDPOINTS = [
+      'https://overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
+      'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+    ];
+    async function fetchOverpass(): Promise<any> {
+      for (const endpoint of OVERPASS_ENDPOINTS) {
+        try {
+          const res = await fetch(`${endpoint}?data=${encodeURIComponent(query)}`);
+          const text = await res.text();
+          if (!text.trimStart().startsWith('{')) continue; // got XML error, try next
+          return JSON.parse(text);
+        } catch {
+          continue;
+        }
+      }
+      throw new Error('Golf course data is temporarily unavailable. Try again in a moment.');
+    }
+    fetchOverpass()
       .then((data) => {
         const list: GolfCourse[] = (data.elements as any[])
           .filter((e) => e.tags?.name)
@@ -118,15 +135,17 @@ function SummaryContent() {
   if (!plan) return null;
 
   const respondents: { label: string; prefs: Preferences; isMe: boolean }[] = [];
+  let playerNum = 1;
   if (plan.creatorPreferences) {
-    // On the organizer's device, token is in the URL; use that to detect "me"
     const isMe = token !== null && myId === null;
-    respondents.push({ label: isMe ? 'You (organizer)' : 'Organizer', prefs: plan.creatorPreferences, isMe });
+    respondents.push({ label: isMe ? 'You' : `Player ${playerNum}`, prefs: plan.creatorPreferences, isMe });
+    playerNum++;
   }
-  plan.invitees.forEach((i, idx) => {
+  plan.invitees.forEach((i) => {
     if (i.responded && i.preferences) {
       const isMe = i.id === myId;
-      respondents.push({ label: isMe ? 'You' : `Player ${idx + 1}`, prefs: i.preferences, isMe });
+      respondents.push({ label: isMe ? 'You' : `Player ${playerNum}`, prefs: i.preferences, isMe });
+      playerNum++;
     }
   });
 
@@ -161,7 +180,7 @@ function SummaryContent() {
             ← Back
           </button>
           <h1 className="text-xl font-bold">⛳ Golf Round</h1>
-          <p className="text-green-200 text-sm">📅 {formatDate(plan.date)} · {total} of {plan.invitees.length + 1} responded</p>
+          <p className="text-green-200 text-sm">📅 {formatDate(plan.date)} · {total} of {plan.invitees.length + 1} submitted prefs</p>
         </div>
       </header>
 
@@ -169,8 +188,8 @@ function SummaryContent() {
         {total === 0 ? (
           <div className="bg-white rounded-2xl p-8 text-center shadow-sm">
             <div className="text-4xl mb-3">📋</div>
-            <h2 className="font-semibold text-gray-700 mb-2">No responses yet</h2>
-            <p className="text-gray-400 text-sm">Share the link with your group to start collecting preferences.</p>
+            <h2 className="font-semibold text-gray-700 mb-2">No preferences yet</h2>
+            <p className="text-gray-400 text-sm">Once your group fills out the link, their preferences will show up here.</p>
             <button
               onClick={() => token
                 ? router.push(`/plans/${planId}/manage/${token}`)
@@ -290,7 +309,7 @@ function SummaryContent() {
             {bestTimes.length > 0 && (
               <div className="bg-white rounded-2xl p-4 shadow-sm border border-green-200">
                 <h2 className="font-bold text-green-700 mb-3 flex items-center gap-2">
-                  <span>🎯</span> Everyone can make it
+                  <span>🎯</span> Works for everyone
                 </h2>
                 <div className="space-y-2">
                   {bestTimes.map((t) => (
@@ -308,7 +327,7 @@ function SummaryContent() {
             {/* Partial */}
             {partialTimes.length > 0 && (
               <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-                <h2 className="font-semibold text-gray-700 mb-3">📅 Partial availability</h2>
+                <h2 className="font-semibold text-gray-700 mb-3">📅 Works for some</h2>
                 <div className="space-y-3">
                   {partialTimes.map((t) => {
                     const pct = Math.round((t.count / total) * 100);

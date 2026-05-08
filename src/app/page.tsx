@@ -37,7 +37,7 @@ export default function HomePage() {
         <div className="text-center mb-8">
           <div className="text-6xl mb-3">⛳</div>
           <h1 className="text-3xl font-bold text-gray-800 tracking-tight">Golf Plans</h1>
-          <p className="text-gray-500 mt-2 text-sm">Pick a date, share a link, see who&apos;s in.</p>
+          <p className="text-gray-500 mt-2 text-sm">Pick a date, share a link, find the perfect round.</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-lg p-6">
@@ -56,7 +56,7 @@ export default function HomePage() {
               type="submit"
               className="w-full bg-green-600 text-white rounded-xl py-4 font-bold text-lg hover:bg-green-700 transition"
             >
-              Preferences →
+              Let's Plan →
             </button>
           </form>
           <p className="text-center text-xs text-gray-400 mt-4">Links expire after 24 hours</p>

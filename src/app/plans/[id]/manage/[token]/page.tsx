@@ -104,7 +104,7 @@ export default function ManagePage() {
             <span>📲</span> Share with your group
           </h2>
           <p className="text-sm text-gray-500 mb-4">
-            Drop this link in your group text. Anyone who taps it can add their preferences.
+            Drop this in your group chat. Each person picks their preferred time, budget, and how far they'll drive.
           </p>
           <div className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-600 font-mono mb-3 break-all">
             {joinUrl}
@@ -143,7 +143,7 @@ export default function ManagePage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-gray-700">Your Preferences</p>
-              <p className="text-xs text-gray-400 mt-0.5">{creatorResponded ? '✅ Submitted' : '⏳ Not filled out yet'}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{creatorResponded ? '✅ Saved' : '⏳ Not filled out yet'}</p>
             </div>
             <button
               onClick={() => router.push(`/plans/${planId}/respond/creator`)}
