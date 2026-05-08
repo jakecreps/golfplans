@@ -24,7 +24,6 @@ export interface Plan {
   creatorToken: string; // secret token — only organizer has this URL
   date: string; // YYYY-MM-DD
   createdAt: string;
-  noExpiry?: boolean; // set true to disable 24h expiry (for testing)
   creatorPreferences?: Preferences;
   invitees: Invitee[];
 }

@@ -237,7 +237,7 @@ function SummaryContent() {
                   ⛳ Courses in the overlap zone
                 </h2>
                 <p className="text-xs text-gray-400 mb-3">
-                  Within everyone's max drive from the midpoint
+                  Within everyone's max drive from their location
                 </p>
                 {coursesLoading && (
                   <div className="flex items-center gap-2 text-sm text-gray-400 py-4 justify-center">

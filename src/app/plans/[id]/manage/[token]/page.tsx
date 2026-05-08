@@ -15,7 +15,6 @@ export default function ManagePage() {
   const [expired, setExpired] = useState(false);
   const [invalid, setInvalid] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [testCopied, setTestCopied] = useState(false);
 
   useEffect(() => {
     const p = getPlan(planId);
@@ -47,27 +46,6 @@ export default function ManagePage() {
     const updated = { ...plan!, invitees: plan!.invitees.filter((i) => i.id !== inviteeId) };
     savePlan(updated);
     setPlan(updated);
-  }
-
-  async function copyTestLink() {
-    const updated = { ...plan!, noExpiry: true };
-    savePlan(updated);
-    setPlan(updated);
-    const url = `${window.location.origin}/${planId}`;
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch {
-      const el = document.createElement('textarea');
-      el.value = url;
-      el.setAttribute('readonly', '');
-      el.style.cssText = 'position:fixed;opacity:0';
-      document.body.appendChild(el);
-      el.select();
-      try { document.execCommand('copy'); } catch { /* ignore */ }
-      document.body.removeChild(el);
-    }
-    setTestCopied(true);
-    setTimeout(() => setTestCopied(false), 2500);
   }
 
   if (expired) {
@@ -139,18 +117,6 @@ export default function ManagePage() {
           >
             {copied ? '✓ Copied!' : '📋 Copy Link'}
           </button>
-          <button
-            onClick={copyTestLink}
-            className={`w-full mt-2 py-2.5 rounded-xl font-semibold text-sm transition border ${
-              testCopied
-                ? 'bg-blue-50 border-blue-300 text-blue-700'
-                : plan?.noExpiry
-                  ? 'bg-blue-50 border-blue-300 text-blue-700'
-                  : 'bg-white border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600'
-            }`}
-          >
-            {testCopied ? '✓ Copied permanent link!' : plan?.noExpiry ? '🔗 Permanent link (copied)' : '🔗 Copy permanent test link'}
-          </button>
         </div>
 
         {/* Responses */}
@@ -218,7 +184,7 @@ export default function ManagePage() {
         )}
 
         <p className="text-center text-xs text-gray-400">
-          {plan.noExpiry ? '🔗 This plan never expires (test mode).' : 'This page expires 24 hours after creation. Bookmark it to return.'}
+          This page expires 24 hours after creation. Bookmark it to return.
         </p>
       </main>
     </div>

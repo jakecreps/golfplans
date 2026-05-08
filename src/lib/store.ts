@@ -12,8 +12,7 @@ export function getPlan(id: string): Plan | undefined {
     const raw = localStorage.getItem(planKey(id));
     if (!raw) return undefined;
     const plan: Plan = JSON.parse(raw);
-    // Expire after 24 hours (unless noExpiry is set)
-    if (!plan.noExpiry && Date.now() - new Date(plan.createdAt).getTime() > EXPIRY_MS) {
+    if (Date.now() - new Date(plan.createdAt).getTime() > EXPIRY_MS) {
       localStorage.removeItem(planKey(id));
       return undefined;
     }
@@ -29,7 +28,6 @@ export function savePlan(plan: Plan): void {
 }
 
 export function isPlanExpired(plan: Plan): boolean {
-  if (plan.noExpiry) return false;
   return Date.now() - new Date(plan.createdAt).getTime() > EXPIRY_MS;
 }
 
