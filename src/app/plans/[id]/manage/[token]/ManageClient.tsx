@@ -19,6 +19,7 @@ export default function ManagePage() {
   const [invalid, setInvalid] = useState(false);
   const [copied, setCopied] = useState(false);
   const [advancing, setAdvancing] = useState(false);
+  const [autoAdvanced, setAutoAdvanced] = useState(false);
 
   useEffect(() => {
     getPlan(planId).then((p) => {
@@ -29,6 +30,18 @@ export default function ManagePage() {
       setLoading(false);
     });
   }, [planId, token]);
+
+  useEffect(() => {
+    if (!plan || plan.phase !== 'collecting' || autoAdvanced || advancing) return;
+    if (!plan.groupSize) return;
+    const creatorResponded = !!plan.creatorPreferences;
+    const respondedCount = plan.invitees.filter((i) => i.responded).length + (creatorResponded ? 1 : 0);
+    if (respondedCount >= plan.groupSize) {
+      setAutoAdvanced(true);
+      advancePhase();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan]);
 
   async function shareLink() {
     const url = `${window.location.origin}/${planId}`;
@@ -118,7 +131,8 @@ export default function ManagePage() {
   const joinUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/${planId}`;
   const creatorResponded = !!plan.creatorPreferences;
   const respondedCount = plan.invitees.filter((i) => i.responded).length + (creatorResponded ? 1 : 0);
-  const totalCount = plan.invitees.length + 1;
+  const totalCount = plan.groupSize ?? plan.invitees.length + 1;
+  const allResponded = plan.groupSize ? respondedCount >= plan.groupSize : false;
 
   const activeVoterIds = new Set([
     ...(plan.creatorPreferences ? [plan.creatorToken] : []),
@@ -267,7 +281,11 @@ export default function ManagePage() {
               <>
                 <h2 className="font-bold text-gray-800 mb-1">Ready to pick a course?</h2>
                 <p className="text-sm text-gray-500 mb-4">
-                  Once you lock responses, the group will vote on courses. Preferences can no longer be submitted after this.
+                  {allResponded
+                    ? 'Everyone has responded! Opening voting…'
+                    : plan.groupSize
+                    ? `Waiting for ${plan.groupSize - respondedCount} more response${plan.groupSize - respondedCount === 1 ? '' : 's'}. Voting opens automatically when the group is complete.`
+                    : 'Once you lock responses, the group will vote on courses. Preferences can no longer be submitted after this.'}
                 </p>
                 <button
                   onClick={advancePhase}

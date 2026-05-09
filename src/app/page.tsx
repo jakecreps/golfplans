@@ -8,6 +8,7 @@ import { createPlan } from '@/lib/store';
 export default function HomePage() {
   const router = useRouter();
   const [date, setDate] = useState('');
+  const [groupSize, setGroupSize] = useState(4);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,6 +29,7 @@ export default function HomePage() {
         date,
         createdAt: new Date().toISOString(),
         phase: 'collecting',
+        groupSize,
         invitees: [],
       });
       router.push(`/plans/${plan.id}/respond/creator`);
@@ -57,6 +59,27 @@ export default function HomePage() {
                 className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-green-500"
                 required
               />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">👥 Group Size</label>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setGroupSize((n) => Math.max(2, n - 1))}
+                  className="w-10 h-10 rounded-xl border border-gray-300 text-xl font-bold text-gray-600 hover:bg-gray-100 transition flex items-center justify-center"
+                >
+                  −
+                </button>
+                <span className="flex-1 text-center text-2xl font-bold text-gray-800">{groupSize}</span>
+                <button
+                  type="button"
+                  onClick={() => setGroupSize((n) => Math.min(24, n + 1))}
+                  className="w-10 h-10 rounded-xl border border-gray-300 text-xl font-bold text-gray-600 hover:bg-gray-100 transition flex items-center justify-center"
+                >
+                  +
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 text-center mt-1">Voting opens automatically once everyone responds</p>
             </div>
             {error && (
               <p className="text-sm text-red-500 bg-red-50 rounded-xl px-3 py-2">{error}</p>
