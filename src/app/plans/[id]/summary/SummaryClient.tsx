@@ -41,6 +41,7 @@ function SummaryContent() {
   const [coursesLoading, setCoursesLoading] = useState(false);
   const [coursesError, setCoursesError] = useState<string | null>(null);
   const [concluding, setConcluding] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     getPlan(planId).then((p) => {
@@ -193,6 +194,24 @@ function SummaryContent() {
     const updated = { ...current, votes };
     await savePlan(updated);
     setPlan(updated);
+  }
+
+  async function shareResults() {
+    const url = window.location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      const el = document.createElement('textarea');
+      el.value = url;
+      el.setAttribute('readonly', '');
+      el.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(el);
+      el.select();
+      try { document.execCommand('copy'); } catch { /* ignore */ }
+      document.body.removeChild(el);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
   }
 
   async function concludeVoting() {
@@ -547,6 +566,22 @@ function SummaryContent() {
           </div>
         )}
       </main>
+
+      {/* Sticky footer: share results */}
+      {phase === 'results' && (
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100 shadow-lg">
+          <div className="max-w-lg mx-auto">
+            <button
+              onClick={shareResults}
+              className={`w-full py-4 rounded-2xl font-bold text-lg transition ${
+                copied ? 'bg-green-100 text-green-700' : 'bg-green-600 text-white hover:bg-green-700'
+              }`}
+            >
+              {copied ? '✓ Link Copied!' : '📋 Share Results'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Sticky footer: organizer close-voting button */}
       {phase === 'voting' && isOrganizer && (
